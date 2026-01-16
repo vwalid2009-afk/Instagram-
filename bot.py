@@ -23,7 +23,7 @@ def keep_alive():
 # --- 2. بيانات الاعتماد (التي زودتني بها) ---
 GEMINI_API_KEY = "AIzaSyBby1cMPsuVcSuG4KOxhBABXxoay17VACg"
 INSTA_USERNAME = "siham07.07.dz"
-INSTA_PASSWORD = "Walid@2009b"
+INSTA_PASSWORD = "Walid@2009"
 
 # إعداد جيميناي
 genai.configure(api_key=GEMINI_API_KEY)
