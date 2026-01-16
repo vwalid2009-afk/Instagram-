@@ -1,54 +1,83 @@
-import telebot
-import requests
-import json
+import os
+import time
+from threading import Thread
+from flask import Flask
+from instagrapi import Client
+import google.generativeai as genai
 
-# --- الإعدادات الخاصة بك ---
-TELEGRAM_TOKEN = "8185624413:AAF9zVStiagM_7HExCIW_7Kf-O8cPzMNJ88"
-GEMINI_KEY = "AIzaSyAeWZY6UjkZIteFJ3bvj39TNF5KAoimnWg"
+# --- 1. إعداد خادم صغير لبقاء البوت يعمل 24 ساعة ---
+app = Flask('')
 
-# إعداد بوت تلغرام
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
+@app.route('/')
+def home():
+    return "I am alive! Bot is running..."
 
-# --- تعريف شخصية وليد ---
-SYSTEM_PROMPT = (
-    "أنت المساعد الذكي الخاص بـ 'وليد'. وليد عمره 16 سنة، يسكن في الدشرة، وهو شخص مغرور ومتكبر وواثق جداً من نفسه بزيادة. "
-    "عندما يراسلك الناس، أجبهم بلهجة جزائرية (دارجة) قحة تعكس شخصية وليد المغرورة. "
-    "تكلم وكأنك الأفضل دائماً، ولا ترحم أحداً بذكائك، وذكّرهم دائماً أنك من الدشرة."
-)
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
 
-def get_gemini_response(user_text):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
-    headers = {'Content-Type': 'application/json'}
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
+
+# --- 2. إعداد الذكاء الاصطناعي (Gemini) ---
+GEMINI_API_KEY = os.environ.get('AIzaSyBby1cMPsuVcSuG4KOxhBABXxoay17VACg')
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-pro')
+
+# --- 3. إعداد إنستغرام ---
+USERNAME = os.environ.get('siham07.07.dz')
+PASSWORD = os.environ.get('Walid@2009b')
+cl = Client()
+
+def start_bot():
+    keep_alive() # تشغيل السيرفر لضمان البقاء متصلاً
     
-    # بناء الطلب لجيميناي
-    payload = {
-        "contents": [{
-            "parts": [{"text": f"{SYSTEM_PROMPT}\nالمستخدم قال: {user_text}\nرد وليد المغرور:"}]
-        }]
-    }
-    
+    print("جاري تسجيل الدخول إلى إنستغرام...")
     try:
-        response = requests.post(url, headers=headers, data=json.dumps(payload))
-        response.raise_for_status() # التأكد من عدم وجود خطأ في الاتصال
-        result = response.json()
-        return result['candidates'][0]['content']['parts'][0]['text']
+        cl.login(USERNAME, PASSWORD)
+        print("تم الاتصال بنجاح! البوت يراقب الرسائل الآن...")
     except Exception as e:
-        print(f"Error: {e}")
-        return "صرا مشكل في الريزو.. بصح واحد كيما وليد ما يحبسوش ريزو عيان، عاود ابعث ميساج."
+        print(f"خطأ في الدخول: {e}")
+        return
 
-# --- استقبال الرسائل ---
-@bot.message_handler(func=lambda message: True)
-def handle_messages(message):
-    # إظهار أن البوت يكتب (Typing...) لزيادة الواقعية
-    bot.send_chat_action(message.chat.id, 'typing')
-    
-    # جلب الرد من جيميناي
-    answer = get_gemini_response(message.text)
-    
-    # إرسال الرد للمستخدم
-    bot.reply_to(message, answer)
+    while True:
+        try:
+            # البحث عن رسائل غير مقروءة (Unseen)
+            threads = cl.direct_threads(unseen=True)
+            
+            for thread in threads:
+                thread_id = thread.id
+                # الحصول على آخر رسالة في المحادثة
+                messages = cl.direct_messages(thread_id, amount=1)
+                if not messages:
+                    continue
+                    
+                last_msg = messages[0]
+                
+                # التأكد أنها رسالة نصية وليست من البوت نفسه
+                if last_msg.item_type == 'text' and last_msg.user_id != cl.user_id:
+                    user_query = last_msg.text
+                    print(f"رسالة جديدة من {last_msg.user_id}: {user_query}")
 
-# تشغيل البوت
+                    # توليد رد باستعمال جيميناي
+                    # ملاحظة: يمكنك تغيير "البرومبت" ليكون الرد بلهجة معينة
+                    prompt = f"أجب على هذه الرسالة بلهجة جزائرية خفيفة وودودة: {user_query}"
+                    response = model.generate_content(prompt)
+                    bot_reply = response.text
+
+                    # إرسال الرد
+                    cl.direct_send(bot_reply, thread_ids=[thread_id])
+                    print(f"تم الرد: {bot_reply}")
+                    
+                    # وضع علامة "مقروء" لكي لا يعيد الرد عليها
+                    cl.direct_thread_mark_as_seen(thread_id)
+
+            # انتظر دقيقة قبل الفحص التالي لتجنب الحظر
+            time.sleep(60)
+            
+        except Exception as e:
+            print(f"حدث خطأ أثناء التشغيل: {e}")
+            time.sleep(30) # انتظر قليلاً وأكمل
+
 if __name__ == "__main__":
-    print("--- بوت وليد المغرور راهو شغال ذرك في تلغرام ---")
-    bot.infinity_polling()
+    start_bot()
